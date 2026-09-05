@@ -1,60 +1,86 @@
-from fastapi import APIRouter, HTTPException
+import json
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from app.core.security import verify_retell_request
 from app.schemas.appointment import (
     AvailabilityRequest,
-    AvailabilityResponse,
     BookingRequest,
-    BookingResponse,
 )
 from app.services.appointment_service import AppointmentService
 
+
 router = APIRouter(prefix="/api/v1")
-service = AppointmentService()
+
+appointment_service = AppointmentService()
 
 
-@router.post(
-    "/availability",
-    response_model=AvailabilityResponse,
-)
-async def check_availability(request: AvailabilityRequest):
+@router.post("/tools/check_availability")
+async def check_availability(
+    request: Request,
+    _: bytes = Depends(verify_retell_request),
+):
     try:
-        available = service.check_availability(
-            request.start,
-            request.end,
+        payload = json.loads((await request.body()).decode("utf-8"))
+        args = payload.get("args", payload)
+
+        request_data = AvailabilityRequest.model_validate(args)
+
+        available = appointment_service.is_available(
+            request_data.start,
+            request_data.end,
         )
-        return {"available": available}
+
+        return {
+            "available": available,
+            "message": (
+                "The requested appointment time is available."
+                if available
+                else "The requested appointment time is not available."
+            ),
+        }
 
     except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc),
-        )
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post(
-    "/appointments",
-    response_model=BookingResponse,
-)
-async def book_appointment(request: BookingRequest):
+@router.post("/tools/book_appointment")
+async def book_appointment(
+    request: Request,
+    _: bytes = Depends(verify_retell_request),
+):
     try:
-        appointment = service.book(
-            request.name,
-            request.phone,
-            request.start,
-            request.end,
-            request.call_id,
-        )
+        payload = json.loads((await request.body()).decode("utf-8"))
 
-        if not appointment:
-            return BookingResponse(
-                success=False,
-                message="The requested time is no longer available.",
+        args = payload.get("args", payload)
+        call = payload.get("call", {})
+
+        call_id = call.get("call_id")
+
+        if not call_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing Retell call ID.",
             )
 
-        return BookingResponse(
-            success=True,
-            appointment_id=appointment["id"],
-            message="Appointment booked successfully.",
+        booking_data = BookingRequest(
+            name=args["name"],
+            phone=args["phone"],
+            start=args["start"],
+            end=args["end"],
+            call_id=call_id,
+        )
+
+        result = appointment_service.book(
+            booking_data
+        )
+
+        return result
+
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required field: {exc.args[0]}",
         )
 
     except ValueError as exc:

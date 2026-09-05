@@ -7,9 +7,11 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_secret_key: str
 
+    retell_api_key: str
+    retell_agent_id: str
+
     app_env: str = "development"
     business_timezone: str = "Asia/Karachi"
-    retell_webhook_secret: str | None = None
 
     model_config = SettingsConfigDict(
         env_file="../.env",
